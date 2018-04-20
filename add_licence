@@ -1,0 +1,30 @@
+declare
+	uid licence.cus_id%type;
+	lno licence.licenceno%type;
+	n number(1);
+begin
+select userid into uid from user_credential where username = :currentuser;
+	if :loggedin = 1 then
+		if :currentstatus = 2 then
+			lno := '&licenceno';
+			select count(*) into n from licence where cus_id = uid;
+			if n = 1 then
+				update licence set licenceno = lno where cus_id = uid;
+				dbms_output.put_line('------------------------');
+				dbms_output.put_line('Licence Entry Updated!!');
+				dbms_output.put_line('------------------------'); 	
+			else	
+				insert into licence values(uid,lno);
+				dbms_output.put_line('------------------------');
+				dbms_output.put_line('Licence Entry Done!!');
+				dbms_output.put_line('------------------------');
+			end if;	 
+		end if;
+	end if;	
+	exception
+	when Dup_val_on_index then
+		dbms_output.put_line('-----------------------------');
+		dbms_output.put_line('Licence details already present');
+		dbms_output.put_line('------------------------------');	
+end;
+/

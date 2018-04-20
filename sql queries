@@ -1,0 +1,653 @@
+
+<--------Table creation-------------->
+Table carmodel:
+----------------------------------------------
+create table carmodel(
+	model_id number(3) primary key,
+	brand varchar2(10) NOT NULL,
+	speed number(3),
+	sc_types varchar2(10),
+	price_km number(8,2)
+);
+
+Table cars:
+-------------------------------------------------
+create table car(
+	car_id number(3) primary key,
+	car_regno varchar2(10) unique,
+	model_id number(3),
+	color varchar2(10),
+    status int
+);
+alter table car add constraint fk_car1 foreign key(model_id) references carmodel(model_id);
+
+Table bookcars:
+--------------------------------------------------
+create table bookcars(
+	car_id number(3),
+	user_id number(3),
+	rentad_on date,
+	no_of_days number(4),
+	deposit number(8,2),
+	amount number(8,2)
+);
+
+alter table bookcars add constraint fk_car foreign key(car_id) references car(car_id);
+alter table bookcars add constraint fk_book foreign key(user_id) references user_credential(userid);
+
+Table returncars:
+---------------------------------------------------
+create table returncars(
+	car_id number(3),
+	user_id number(3),
+	rented_on date,
+	returned_on date,
+	amt_to_be_paid number(8,2),
+	processempid number(3),
+	remark varchar2(10) 
+);
+
+Table licence :
+----------------------------------------------
+create table licence(
+	user_id number(3),
+	licenceno number(15) primary key
+);
+
+Table : employee
+--------------------------------------------------
+create table employee(
+	emp_id number(3) primary key,
+	name varchar2(20),
+	address varchar2(20),
+	phone number(10),
+	dob date,
+	hiredate date,
+	status number(1)
+);
+
+SQL> desc employee
+ Name					   Null?    Type
+ ----------------------------------------- -------- ----------------------------
+ EMP_ID 				   NOT NULL NUMBER(3)
+ NAME						    VARCHAR2(20)
+ ADDRESS					    VARCHAR2(20)
+ PHONE						    NUMBER(10)
+ DOB						    DATE
+ HIREDATE					    DATE
+ STATUS 					    NUMBER(1)
+
+Table : allocateUser
+----------------------------------------------------------
+create table allocateUser(
+	emp_id number(3),
+	car_id number(3),
+	user_id number(3),
+	allocate_time date
+);
+
+SQL> desc allocateUser
+ Name					   Null?    Type
+ ----------------------------------------- -------- ----------------------------
+ EMP_ID 					    NUMBER(3)
+ CAR_ID 					    NUMBER(3)
+ USER_ID					    NUMBER(3)
+ ALLOCATE_TIME					DATE
+
+
+Table : User_credential
+----------------------------------------
+CREATE TABLE USER_CREDENTIAL 
+(
+  USERID NUMBER(3, 0) NOT NULL 
+, USERNAME VARCHAR2(10 BYTE) NOT NULL 
+, PASSWORD VARCHAR2(10 BYTE) NOT NULL
+, user_status number(1) 
+, CONSTRAINT PK1 PRIMARY KEY 
+  (
+    USERID 
+  )
+);
+ALTER TABLE USER_CREDENTIAL
+ADD CONSTRAINT UK1 UNIQUE 
+(
+  USERNAME 
+);
+
+Table : User_details
+-----------------------------------------
+CREATE TABLE USER_DETAILS 
+(
+  USERID NUMBER(3) NOT NULL 
+, USERNAME VARCHAR2(10) NOT NULL 
+, FIRSTNAME VARCHAR2(10) NOT NULL 
+, LASTNAME VARCHAR2(10) NOT NULL 
+, ADDRESS VARCHAR2(20) 
+, PHONENO NUMBER(10) 
+, DOB DATE 
+, AGE NUMBER(3) 
+, CONSTRAINT USER_DETAILS_PK PRIMARY KEY 
+  (
+    USERID 
+  )
+, CONSTRAINT "FK1" FOREIGN KEY ("USERID")
+  REFERENCES USER_CREDENTIAL("USERID")
+  ENABLE 
+);
+
+TRIGGERS
+
+
+LICENCE CHECK TRIGGER TO RENT A CAR
+
+Trigger : licencecheck
+------------------------------------------------------------
+create or replace trigger licencecheck
+before insert on bookcars 
+for each row
+enable
+declare 
+cursor curlic is select * from licence;
+licrow licence%rowtype;
+flag number(3);
+begin
+flag:=0;
+open curlic;
+loop
+fetch curlic into licrow;
+exit when curlic%notfound;
+if (:new.user_id!=licrow.cus_id) then
+flag:=1;
+else 
+flag:=0;
+end if;
+end loop;
+close curlic;
+if(flag=1) then
+raise_application_error(-20002,'Request denied!!! Customer doesnt have a licence ,So car cant be rented');
+end if;
+end;
+/
+
+
+
+
+
+
+Trigger : password_strength
+create or replace trigger before_signup_user 
+before insert or update on user_credential
+for each row 
+enable
+begin
+dbms_output.put_line('new password' || :new.password);
+if checkpwd_strength(:new.password) = 0 then
+	raise_application_error(-20008,'Password strength is not strong!!');
+end if;
+end;
+/
+
+Trigger : emp_trigger
+-----------------------------------------------------------------------
+create or replace trigger emp_trigger 
+before insert on employee
+for each row 
+enable
+begin
+if :new.hiredate < sysdate then
+	raise_application_error(-20008,'Cannot hire before current date!!');
+end if;
+end;
+/
+
+Trigger : trig_bookcar
+---------------------------------------------------------
+create or replace trigger trig_bookcar
+before insert on bookcars
+for each row 
+enable
+begin
+--dbms_output.put_line('new password' || :new.password);
+if :new.rentad_on < sysdate then
+	raise_application_error(-20008,'Cannot book car on that date!!');
+end if;
+end;
+/
+
+
+
+PROCEDURES
+
+
+Procedure bookcar:
+-------------------------------------------
+create or replace procedure bookcar(
+	cid car.car_id%type,
+	uid user_credential.userid%type,
+	no_days bookcars.no_of_days%type,
+	deposit bookcars.deposit%type
+)
+as
+cursor curcar is select * from carmodel natural join car where car_id = cid; 
+rowcar curcar%rowtype;
+amount bookcars.amount%type;
+begin
+open curcar;
+fetch curcar into rowcar;
+if (rowcar.status=1) then
+  dbms_output.put_line('car available');
+  amount:=no_days*rowcar.price_km;
+  dbms_output.put_line('amount: ' || amount); 
+  insert into bookcars values(cid,uid,sysdate,no_days,deposit,amount);
+  update car set status=0 where car_id=cid;
+  allocate_employee(cid,uid);	
+else
+	dbms_output.put_line('Sorry car not available'); 
+   	dbms_output.put_line('Other choices');
+   	dbms_output.put_line('Move to bookcars');
+end if;
+close curcar;
+end;
+/
+
+Procedure returncar:
+-------------------------------------------------
+create or replace procedure returncar
+(
+	cid bookcars.car_id%type,
+	uid bookcars.user_id%type
+)
+as
+rent_date date;
+return_date date;
+balance bookcars.amount%type;
+fine bookcars.amount%type;
+bal bookcars.amount%type;
+flag int;
+comment returncars.remark%type;
+cursor cur_rent is select * from bookcars;
+rentrow cur_rent%rowtype;
+begin
+flag:=1;
+open cur_rent;
+loop
+	fetch cur_rent into rentrow;
+	exit when cur_rent%notfound;
+	if((cid=rentrow.car_id)and(uid=rentrow.user_id)) then
+ 		rent_date:=rentrow.rentad_on;
+ 	    return_date:=rentrow.rentad_on+rentrow.no_of_days;
+		if(sysdate<=return_date) then
+  			bal:=rentrow.amount-rentrow.deposit;
+  			comment:='Good';
+  		else
+  			balance:=(rentrow.amount-rentrow.deposit);
+  			fine:=(round(sysdate-rentrow.rentad_on)-rentrow.no_of_days)*1000;
+  			dbms_output.put_line('Balance: '|| balance);
+  			dbms_output.put_line('Fine: '||fine);
+  			bal:=balance+fine;
+  			return_date:=sysdate;
+  			comment:='Bad';
+  		end if;
+  		flag:=1;
+	end if;
+end loop;
+close cur_rent;
+if(flag=1) then
+	insert into returncars values(cid,uid,rent_date,return_date,bal,comment);
+    update car set status=1 where car_id=cid;
+    delete from bookcars where car_id=cid;
+    allocate_employee(cid,uid);
+	dbms_output.put_line('Car '||cid || ' returned on '||sysdate);
+    dbms_output.put_line('Balance paid: '||bal);
+ end if;
+ if(flag=0) then
+        dbms_output.put_line('Information Mismatch'); 
+ end if;
+end;
+/
+
+Procedure :billdetails
+------------------------------------------------------------
+create or replace procedure billdetails
+(
+	uid user_credential.userid%type
+)
+AS
+cursor cur_bill is select * from returncars natural join car natural join carmodel where user_id = uid;
+row_biil cur_bill%rowtype;
+total_amt returncars.amt_to_be_paid%type; 
+NL constant varchar2(1):=CHR(5);  
+begin
+	select sum(amt_to_be_paid) into total_amt from returncars group by uid;
+	--dbms_output.put_line(total_amt);
+	dbms_output.put_line(rpad('Carid',10,' ')||NL||rpad('CarBrand',10,' ')||NL||rpad('Carcolor',10,' ')||NL
+	||rpad('CarType',10,' ')||NL||rpad('AmtPaid',10,' '));
+	dbms_output.put_line('**************************************************************************');
+	for row_bill in cur_bill
+	loop
+		dbms_output.put_line(rpad(row_bill.car_id,10,' ')||NL||rpad(row_bill.brand,10,' ')||NL||
+			rpad(row_bill.color,10,' ')||NL||rpad(row_bill.sc_types,10,' ')||NL||rpad(row_bill.amt_to_be_paid,10,' '));
+    end loop;
+    dbms_output.put_line('**************************************************************************');
+    dbms_output.put_line('Total amount to be paid: '||total_amt);
+end billdetails;
+/
+
+Procedure: add_cardetails
+-------------------------------------------------------------------
+create or replace procedure add_cardetails(
+	mid carmodel.model_id%type,
+	cbrand carmodel.brand%type,
+	cspeed carmodel.speed%type,
+	csc_types carmodel.sc_types%type,
+	rentcharge carmodel.price_km%type,
+	cid car.car_id%type,
+	cregno car.car_regno%type,
+	ccolor car.color%type,
+	status car.status%type
+)
+as 
+begin
+insert into carmodel values(mid,cbrand,cspeed,csc_types,rentcharge);
+insert into car values(cid,cregno,mid,ccolor,status);
+dbms_output.put_line('Car entry inserted!!');
+exception
+when Dup_val_on_index then
+dbms_output.put_line('-------------------');
+dbms_output.put_line('Same car registered no cannot be inserted!!');
+dbms_output.put_line('-------------------');
+end add_cardetails;
+/
+
+
+Procedure: delete_cardetails
+--------------------------------------------------------
+create or replace procedure delete_cardetails
+as
+cid car.car_id%type;
+n number(1);
+begin
+cid:='&cid';
+select count(*) into n from car where car_id = cid;
+if(n=1) then
+	delete from car where car_id = cid;
+	dbms_output.put_line('----------------------------');
+	dbms_output.put_line('Car details successfully Deleted');	
+	dbms_output.put_line('----------------------------');
+else
+	dbms_output.put_line('-------------------------');
+	dbms_output.put_line('Car Details not found');
+	dbms_output.put_line('-------------------------');
+end if;
+end;
+/
+exec delete_cardetails;
+
+Procedure : signup_user
+------------------------------------------------
+create or replace PROCEDURE signup_user 
+(
+  UNAME  user_credential.username%type
+, PASS   user_credential.password%type
+, ustatus user_credential.user_status%type 
+) AS
+BEGIN
+	insert into user_credential values(SEQ_USERID.nextval,UNAME,pass,ustatus);
+	DBMS_OUTPUT.PUT_LINE('Inserted!!');
+	DBMS_OUTPUT.PUT_LINE('move to login page via @Login');
+ 	
+EXCEPTION
+    WHEN DUP_VAL_ON_INDEX THEN
+        DBMS_OUTPUT.PUT_LINE('User already exists!!');
+
+END signup_user;
+/
+
+Procedure : add_userdetails
+--------------------------------------------------------
+create or replace procedure add_userdetails(
+  uid user_details.userid%type,
+  uname user_details.username%type,
+  fname user_details.firstname%type,
+  lname user_details.lastname%type,
+  addr user_details.address%type,
+  phno user_details.phoneno%type,
+  dob user_details.DOB%type,
+  age user_details.age%type
+)
+AS
+null_not_allowed EXCEPTION;
+PRAGMA EXCEPTION_INIT(null_not_allowed, -01400);
+begin
+insert into user_details values(uid,uname,fname,lname,addr,phno,dob,age);
+dbms_output.put_line('----------------------------------');
+dbms_output.put_line('User details successfully entered');
+dbms_output.put_line('----------------------------------');
+exception
+when Dup_val_on_index then
+  dbms_output.put_line('-----------------------------');
+  dbms_output.put_line('User details already present');
+  dbms_output.put_line('------------------------------');
+when null_not_allowed then
+    dbms_output.put_line('-----------------------------');
+  dbms_output.put_line('Null value not allowed');
+  dbms_output.put_line('------------------------------');
+
+end add_userdetails;
+/
+
+Procedure : update_password
+---------------------------------------------------------
+create or replace procedure update_password
+(
+uid user_credential.userid%type,
+pwd user_credential.password%type
+)
+AS
+n number(1);
+begin
+select count(*) into n from user_credential where userid = uid;
+if(n = 1) then
+  update user_credential set password = pwd where userid = uid;
+  dbms_output.put_line('-----------------------------');
+  dbms_output.put_line('Password successfully updated');
+  dbms_output.put_line('-----------------------------');
+else
+  dbms_output.put_line('---------------');
+  dbms_output.put_line('Invalid User_ID');
+  dbms_output.put_line('---------------');
+end if;
+end;
+/
+
+Procedure : add_employee
+-----------------------------------------------------------------
+create or replace procedure add_employee(
+	ename employee.name%type,
+	addr employee.address%type,
+	phno employee.phone%type,
+	dob employee.dob%type,
+	hdate employee.hiredate%type
+)
+AS
+eid employee.emp_id%type;
+begin
+eid:=seq_empid.nextval;
+insert into employee values(eid,ename,addr,phno,dob,hdate,0);
+dbms_output.put_line('----------------------------------');
+dbms_output.put_line('Employee details successfully entered');
+dbms_output.put_line('----------------------------------');
+exception
+when Dup_val_on_index then
+	dbms_output.put_line('-----------------------------');
+	dbms_output.put_line('Employee details already present');
+	dbms_output.put_line('------------------------------');
+end add_employee;
+/
+
+Procedure : delete_employee
+---------------------------------------------------------------
+create or replace procedure delete_employee
+AS
+eid employee.emp_id%type;
+n number(1);
+begin
+eid:='&employee_id';
+select count(*) into n from employee where emp_id = eid;
+if n = 1 
+then
+	delete from employee where emp_id = eid;
+	dbms_output.put_line('----------------------------------');
+	dbms_output.put_line('Employee details successfully deleted');
+	dbms_output.put_line('----------------------------------');
+else
+	dbms_output.put_line('----------------------------------');
+	dbms_output.put_line('Employee details not found');
+	dbms_output.put_line('----------------------------------');	
+end if;
+end delete_employee;
+/
+
+Procedure : allocate_employee
+------------------------------------------------------------------
+
+create or replace procedure allocate_employee(
+	cid allocateUser.car_id%type,
+	uid allocateUser.user_id%type
+)
+AS
+eid employee.emp_id%type;
+cursor alloc_cur is select * from employee;
+row_alloc alloc_cur%rowtype;
+flag number(1);
+begin
+flag := 0;
+
+for row_alloc in alloc_cur
+loop
+if row_alloc.status = 0 then
+	flag := 1;
+	insert into allocateUser values(eid,cid,uid,sysdate);
+	update employee set status = 1 where emp_id = eid; 	
+	dbms_output.put_line('----------------------------------');
+	dbms_output.put_line('Employee is successfully allocated');
+	dbms_output.put_line('----------------------------------');
+	exit;
+end if;	
+end loop;
+
+if flag = 0 then
+	dbms_output.put_line('----------------------------------');
+	dbms_output.put_line('All the employee is busy.');
+	dbms_output.put_line('Cars will be avaliable to u after 3 hrs');
+	dbms_output.put_line('----------------------------------');
+end if;	
+end allocate_employee;
+/
+
+
+Procedure : deallocate_employee
+--------------------------------------------------------
+
+create or replace procedure deallocate_employee
+AS
+dealloc_date allocateUser.allocate_time%type;
+cursor dealloc_cur is select * from employee;
+row_dealloc dealloc_cur%rowtype;
+flag number(1);
+begin
+
+for row_dealloc in dealloc_cur
+loop
+	select to_char(allocate_time + 2/24,'hh24:mm:si') into dealloc_date from allocateUser 
+	where emp_id = row_dealloc.emp_id;
+	if(dealloc_date >= sysdate) then
+		delete from allocateUser where emp_id = row_dealloc.emp_id;
+		update employee set status = 0 where emp_id = row_dealloc.emp_id; 	
+		dbms_output.put_line('----------------------------------');
+		dbms_output.put_line('Employee is successfully deallocated');
+		dbms_output.put_line('----------------------------------');
+	end if;	
+end loop;
+end deallocate_employee;
+/
+
+<-------------------Function----------------->
+CREATE OR REPLACE FUNCTION verify_pwd (password user_credential.password%type)  RETURN integer IS
+ 
+chararray     VARCHAR2(52);
+differ          INTEGER;
+digitarray     VARCHAR2(20);
+ischar          BOOLEAN;
+isdigit          BOOLEAN;
+ispunct1          BOOLEAN;
+m          INTEGER;
+n          BOOLEAN;
+j integer;
+punctarray     VARCHAR2(26);
+ 
+BEGIN
+   digitarray := '0123456789';
+   chararray := 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+   punctarray := '!"#@$%&()''*+,-/:;<=>?_';
+ 
+   IF LENGTH(password) < 6 THEN
+      raise_application_error(-20003, 'Password Length Must Be At Least 6 Characters In Length');
+      return 0;
+   END IF;
+ 
+ 
+   isdigit := FALSE;
+   m := LENGTH(password);
+   FOR i IN 1..10 LOOP
+      FOR j IN 1..m LOOP
+         IF SUBSTR(password,j,1) = SUBSTR(digitarray,i,1) THEN
+            isdigit := TRUE;
+            GOTO findchar;
+         END IF;
+      END LOOP;
+   END LOOP;
+ 
+   IF isdigit = FALSE THEN
+      raise_application_error(-20006, 'Password Must Contain At Least One Numeric Digit');
+    return 0;   
+END IF;
+   <<findchar>>
+   ischar := FALSE;
+   FOR i IN 1..LENGTH(chararray) LOOP
+      FOR j IN 1..m LOOP
+         IF SUBSTR(password,j,1) = SUBSTR(chararray,i,1) THEN
+            ischar := TRUE;
+            GOTO findpunct;
+         END IF;
+      END LOOP;
+   END LOOP;
+ 
+   IF ischar = FALSE THEN
+      raise_application_error(-20007, 'Password Must Contain At Least One Alpha Character');
+     return 0;   
+END IF;
+ 
+   
+   <<findpunct>>
+   
+   ispunct1 := FALSE;
+   FOR i IN 1..LENGTH(punctarray) LOOP
+      FOR k IN 1..m LOOP
+         IF SUBSTR(password,k,1) = SUBSTR(punctarray,i,1) THEN
+            ispunct1 := TRUE;
+            exit;
+         END IF;
+      END LOOP;
+   END LOOP;
+ 
+   IF ispunct1 = FALSE THEN
+      raise_application_error(-20008, 'Password Must Contain At Least One Special character');
+      return 0;
+    else
+      return 1;
+   END IF;      
+ 
+   
+END;
+/
